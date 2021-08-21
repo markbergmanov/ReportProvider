@@ -1,0 +1,66 @@
+<?$_SERVER["DOCUMENT_ROOT"] = realpath(dirname(__FILE__)."/../..");
+
+require($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php");
+// die();
+use Bitrix\Main;
+use Bitrix\Main\Loader;
+
+use Bitrix\Highloadblock as HL;
+//сохраняем итоги дня по браку
+
+Loader::includeModule('iblock');
+
+Loader::IncludeModule("highloadblock");
+
+$dateFrom = date("d.m.Y H:i:s", mktime(0, 0, 0, date("m"), date("d")));
+$arParams['setDateFrom'] = $dateFrom;
+$arParams['dateDay'] = 'today';
+$brak = new Local\Component\Sklad\Brak($arParams);
+$resultBrak = $brak->getSendRecheckToday();
+
+
+if(!empty($resultBrak)){
+
+    $provider = Local\Hlblock\Provider::getList('UF_XML_ID', ['select'=>['ID', 'UF_XML_ID']]);
+
+    foreach ($resultBrak as $valProv) {
+        foreach ($valProv as $kProv => $value) {
+            $providers[$kProv] = $provider[$kProv]['ID'];
+        }   
+    }
+
+    $hlblock = HL\HighloadBlockTable::getList(array('filter' => array('=TABLE_NAME' => 'Returnsproviders')))->fetch();
+    $entity = HL\HighloadBlockTable::compileEntity($hlblock);
+    $entityClass = $entity->getDataClass();
+
+
+    $res = $entityClass::getList(array(
+       'select' => array('*'),
+       'order' => array('ID' => 'ASC'),
+       'filter' => array(
+           'UF_PROVIDER' => $providers,
+           '>=UF_DATE' => $dateFrom
+     )
+    ));
+
+    while ($row = $res->fetch()) {
+        $historyReturn[$row['UF_DATE']->format('j.m')][$row['UF_PROVIDER']] = $row;
+    }
+
+
+    foreach ($resultBrak as $kDate => $Provs) {
+        foreach ($Provs as $kProv => $value) {
+            $arAdd = [
+              'UF_DATE' => date('d.m.Y H:i:s', strtotime($kDate.'.'.date('Y'))),
+              'UF_PROVIDER' => $provider[$kProv]['ID'],
+              'UF_SUMM' => $value['SUMM'],
+              'UF_ITEMS' => serialize($value['ITEMS'])
+            ];
+
+            if(!empty($historyReturn[$kDate][$provider[$kProv]['ID']]))
+                $result = $entityClass::update($historyReturn[$kDate][$provider[$kProv]['ID']]['ID'], $arAdd);
+            else
+                $result = $entityClass::add($arAdd);           
+        }
+    }
+}
